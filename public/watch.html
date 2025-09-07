@@ -1,10 +1,19 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-  <meta charset="UTF-8">
-  <title>Kijk Stream</title>
+  <meta charset="UTF-8" />
+  <title>Kijk Live</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    video { width: 90%; max-width: 640px; border: 2px solid #444; border-radius: 8px; display:block; }
+    .nav a { margin-right: 12px; }
+  </style>
 </head>
 <body>
+  <div class="nav">
+    <a href="/">📡 Live starten</a>
+    <a href="/videos5713">🎞️ Opnames</a>
+  </div>
   <h1>👀 Livestream bekijken</h1>
   <video id="remoteVideo" autoplay playsinline controls></video>
 
@@ -14,9 +23,7 @@
     const remoteVideo = document.getElementById("remoteVideo");
 
     let pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" } // STUN server
-      ]
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
     });
 
     pc.ontrack = (event) => {
@@ -35,11 +42,7 @@
     });
 
     socket.on("ice-candidate", async (candidate) => {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch (err) {
-        console.error("ICE error:", err);
-      }
+      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (err) { console.error("ICE error:", err); }
     });
   </script>
 </body>
