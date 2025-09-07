@@ -2,42 +2,23 @@
 <html lang="nl">
 <head>
   <meta charset="UTF-8" />
-  <title>Start Live + Opname</title>
+  <title>Live Stream (auto)</title>
   <style>
     body { font-family: sans-serif; padding: 20px; }
     video { width: 90%; max-width: 640px; border: 2px solid #444; border-radius: 8px; display:block; margin-bottom:10px; }
-    button { padding: 10px 16px; margin-right: 8px; }
-    input[type="text"] { padding:8px; width: min(480px, 90%); }
-    .nav a { margin-right: 12px; }
-    .hint { color:#333; margin: 8px 0 16px; }
     #status { margin-top: 8px; }
   </style>
 </head>
 <body>
-  <div class="nav">
-    <a href="/watch.html">👀 Live kijken</a>
-    <a href="/videos5713">🎞️ Opnames</a>
-  </div>
-  <h1>🎥 Live stream starten + opnemen</h1>
-  <div class="hint">Start je live stream. Wanneer je <b>Stop</b> klikt, wordt je opname als .webm geüpload naar de server en verschijnt die onder <b>/videos5713</b>.</div>
-
-  <label>Titel opname (optioneel):</label><br/>
-  <input id="title" type="text" placeholder="Bijv. test-1" /><br/><br/>
-
+  <h1>🎥 Live & opname gestart...</h1>
   <video id="local" autoplay playsinline muted></video>
-  <button id="startBtn">Start Live</button>
-  <button id="stopBtn" disabled>Stop</button>
   <div id="status"></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
-
     const localVideo = document.getElementById("local");
-    const startBtn = document.getElementById("startBtn");
-    const stopBtn = document.getElementById("stopBtn");
     const statusEl = document.getElementById("status");
-    const titleEl = document.getElementById("title");
 
     let pc;
     let mediaRecorder;
@@ -46,7 +27,7 @@
 
     function setStatus(msg) { statusEl.textContent = msg; }
 
-    startBtn.onclick = async () => {
+    async function startEverything() {
       try {
         liveStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user" },
@@ -54,7 +35,7 @@
         });
         localVideo.srcObject = liveStream;
 
-        // WebRTC verbinding voor live
+        // WebRTC live
         pc = new RTCPeerConnection({
           iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
         });
@@ -72,62 +53,50 @@
           try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) { console.error(e); }
         });
 
-        // Opname starten
+        // Opname
         recordedChunks = [];
         mediaRecorder = new MediaRecorder(liveStream, { mimeType: "video/webm" });
         mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
-        mediaRecorder.onstop = async () => {
-          try {
-            const blob = new Blob(recordedChunks, { type: "video/webm" });
-            recordedChunks = [];
-            const form = new FormData();
-            form.append("recording", blob, "opname.webm");
-            form.append("title", titleEl.value || "opname");
-            setStatus("⏳ Uploaden...");
-            const res = await fetch("/upload-recording", { method: "POST", body: form });
-            if (!res.ok) throw new Error(await res.text());
-            setStatus("✅ Opname geüpload. Bekijk terug op /videos5713");
-          } catch (err) {
-            console.error(err);
-            setStatus("❌ Upload mislukt: " + err.message);
-          }
-        };
-        mediaRecorder.start(); // begint direct met opnemen
+        mediaRecorder.onstop = uploadRecording;
+        mediaRecorder.start();
 
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
-        setStatus("⏺ Live & opnemen gestart...");
+        setStatus("⏺ Live & opname gestart automatisch");
       } catch (err) {
         console.error(err);
-        alert("Kon camera/microfoon niet starten: " + err.message);
+        setStatus("❌ Kon camera/microfoon niet starten: " + err.message);
       }
-    };
+    }
 
-    stopBtn.onclick = async () => {
+    async function uploadRecording() {
       try {
-        // Live stoppen
-        if (pc) {
-          pc.getSenders().forEach(s => { try { s.track && s.track.stop(); } catch(_){} });
-          try { pc.close(); } catch(_){}
-          pc = null;
-        }
-        // Opname stoppen → triggert onstop → upload
+        const blob = new Blob(recordedChunks, { type: "video/webm" });
+        recordedChunks = [];
+        const form = new FormData();
+        form.append("recording", blob, "opname.webm");
+        form.append("title", "auto");
+        setStatus("⏳ Uploaden...");
+        const res = await fetch("/upload-recording", { method: "POST", body: form });
+        if (!res.ok) throw new Error(await res.text());
+        setStatus("✅ Opname geüpload. Terug te zien op /videos5713");
+      } catch (err) {
+        console.error(err);
+        setStatus("❌ Upload mislukt: " + err.message);
+      }
+    }
+
+    // Stop automatisch als gebruiker site sluit
+    window.addEventListener("beforeunload", () => {
+      try {
         if (mediaRecorder && mediaRecorder.state !== "inactive") {
           mediaRecorder.stop();
         }
-        // Stream tracks stoppen
-        if (liveStream) {
-          liveStream.getTracks().forEach(t => t.stop());
-          liveStream = null;
-        }
-        stopBtn.disabled = true;
-        startBtn.disabled = false;
-        setStatus("⏹ Gestopt. Upload wordt uitgevoerd (even geduld)...");
-      } catch (err) {
-        console.error(err);
-        setStatus("❌ Fout bij stoppen: " + err.message);
-      }
-    };
+        if (pc) { pc.close(); }
+        if (liveStream) { liveStream.getTracks().forEach(t => t.stop()); }
+      } catch (_) {}
+    });
+
+    // 🚀 Direct starten bij laden
+    startEverything();
   </script>
 </body>
 </html>
