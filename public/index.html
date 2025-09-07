@@ -1,52 +1,132 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-  <meta charset="UTF-8">
-  <title>CameraPro starten</title>
+  <meta charset="UTF-8" />
+  <title>Start Live + Opname</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    video { width: 90%; max-width: 640px; border: 2px solid #444; border-radius: 8px; display:block; margin-bottom:10px; }
+    button { padding: 10px 16px; margin-right: 8px; }
+    input[type="text"] { padding:8px; width: min(480px, 90%); }
+    .nav a { margin-right: 12px; }
+    .hint { color:#333; margin: 8px 0 16px; }
+    #status { margin-top: 8px; }
+  </style>
 </head>
 <body>
-  <h1>CameraPro starten</h1>
-  <video id="video" autoplay playsinline muted></video><br>
-  <button id="startBtn">Start Stream</button>
+  <div class="nav">
+    <a href="/watch.html">👀 Live kijken</a>
+    <a href="/videos5713">🎞️ Opnames</a>
+  </div>
+  <h1>🎥 Live stream starten + opnemen</h1>
+  <div class="hint">Start je live stream. Wanneer je <b>Stop</b> klikt, wordt je opname als .webm geüpload naar de server en verschijnt die onder <b>/videos5713</b>.</div>
+
+  <label>Titel opname (optioneel):</label><br/>
+  <input id="title" type="text" placeholder="Bijv. test-1" /><br/><br/>
+
+  <video id="local" autoplay playsinline muted></video>
+  <button id="startBtn">Start Live</button>
+  <button id="stopBtn" disabled>Stop</button>
+  <div id="status"></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
-    const video = document.getElementById("video");
+
+    const localVideo = document.getElementById("local");
     const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const statusEl = document.getElementById("status");
+    const titleEl = document.getElementById("title");
+
     let pc;
+    let mediaRecorder;
+    let recordedChunks = [];
+    let liveStream;
+
+    function setStatus(msg) { statusEl.textContent = msg; }
 
     startBtn.onclick = async () => {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      video.srcObject = stream;
+      try {
+        liveStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: true
+        });
+        localVideo.srcObject = liveStream;
 
-      pc = new RTCPeerConnection({
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" } // STUN server
-        ]
-      });
+        // WebRTC verbinding voor live
+        pc = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        });
+        liveStream.getTracks().forEach(t => pc.addTrack(t, liveStream));
+        pc.onicecandidate = e => { if (e.candidate) socket.emit("ice-candidate", e.candidate); };
 
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("offer", offer);
 
-      pc.onicecandidate = e => {
-        if (e.candidate) socket.emit("ice-candidate", e.candidate);
-      };
+        socket.on("answer", async (answer) => {
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        });
+        socket.on("ice-candidate", async (candidate) => {
+          try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) { console.error(e); }
+        });
 
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socket.emit("offer", offer);
+        // Opname starten
+        recordedChunks = [];
+        mediaRecorder = new MediaRecorder(liveStream, { mimeType: "video/webm" });
+        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+        mediaRecorder.onstop = async () => {
+          try {
+            const blob = new Blob(recordedChunks, { type: "video/webm" });
+            recordedChunks = [];
+            const form = new FormData();
+            form.append("recording", blob, "opname.webm");
+            form.append("title", titleEl.value || "opname");
+            setStatus("⏳ Uploaden...");
+            const res = await fetch("/upload-recording", { method: "POST", body: form });
+            if (!res.ok) throw new Error(await res.text());
+            setStatus("✅ Opname geüpload. Bekijk terug op /videos5713");
+          } catch (err) {
+            console.error(err);
+            setStatus("❌ Upload mislukt: " + err.message);
+          }
+        };
+        mediaRecorder.start(); // begint direct met opnemen
 
-      socket.on("answer", async (answer) => {
-        await pc.setRemoteDescription(new RTCSessionDescription(answer));
-      });
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        setStatus("⏺ Live & opnemen gestart...");
+      } catch (err) {
+        console.error(err);
+        alert("Kon camera/microfoon niet starten: " + err.message);
+      }
+    };
 
-      socket.on("ice-candidate", async (candidate) => {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (err) {
-          console.error("ICE error:", err);
+    stopBtn.onclick = async () => {
+      try {
+        // Live stoppen
+        if (pc) {
+          pc.getSenders().forEach(s => { try { s.track && s.track.stop(); } catch(_){} });
+          try { pc.close(); } catch(_){}
+          pc = null;
         }
-      });
+        // Opname stoppen → triggert onstop → upload
+        if (mediaRecorder && mediaRecorder.state !== "inactive") {
+          mediaRecorder.stop();
+        }
+        // Stream tracks stoppen
+        if (liveStream) {
+          liveStream.getTracks().forEach(t => t.stop());
+          liveStream = null;
+        }
+        stopBtn.disabled = true;
+        startBtn.disabled = false;
+        setStatus("⏹ Gestopt. Upload wordt uitgevoerd (even geduld)...");
+      } catch (err) {
+        console.error(err);
+        setStatus("❌ Fout bij stoppen: " + err.message);
+      }
     };
   </script>
 </body>
