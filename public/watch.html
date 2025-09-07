@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <title>Kijk Stream</title>
+</head>
+<body>
+  <h1>👀 Livestream bekijken</h1>
+  <video id="remoteVideo" autoplay playsinline controls></video>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const remoteVideo = document.getElementById("remoteVideo");
+    let pc = new RTCPeerConnection();
+
+    pc.ontrack = (event) => {
+      remoteVideo.srcObject = event.streams[0];
+    };
+
+    pc.onicecandidate = e => {
+      if (e.candidate) socket.emit("ice-candidate", e.candidate);
+    };
+
+    socket.on("offer", async (offer) => {
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit("answer", answer);
+    });
+
+    socket.on("ice-candidate", async (candidate) => {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.error("ICE error:", err);
+      }
+    });
+  </script>
+</body>
+</html>
